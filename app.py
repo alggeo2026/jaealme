@@ -17,39 +17,41 @@ if "inventory" not in st.session_state:
 if "persona" not in st.session_state:
     st.session_state.persona = "민아"
 
-# [유지] 2. 페르소나 및 학습 기반 답변 로직
+# [보완] 2. 유연한 키워드 매칭 답변 로직
 def generate_response(user_input):
+    # 학습된 내용 우선 확인 (부분 일치로 개선)
     correction = next((note['correct'] for note in st.session_state.learning_note if note['wrong'] in user_input), None)
     
     if any(word in user_input for word in ["틀렸어", "아니야", "그거 아냐", "잘못알았어"]):
         return "몰라서 그랬어 미안! 알려주면 고치께. 뭐가 맞는 거야?"
     
     if correction:
-        return f"[{st.session_state.persona}] 아 맞다, {correction}라고 했지! 이번엔 진짜 안 잊어버릴게."
+        return f"[{st.session_state.persona}] 아 맞다, {correction}라고 했지! 이제 확실히 기억나."
 
-    if "안녕" in user_input:
-        return f"[{st.session_state.persona}] 왔어? 밖은 어때? 뭐 필요한 거 있어?"
+    # 키워드 기반 유연한 응대 (정확히 일치하지 않아도 반응함)
+    if any(word in user_input for word in ["안녕", "안녕히", "반가워", "하이"]):
+        return f"[{st.session_state.persona}] 왔어? 뭐 필요한 거 있어?"
     elif "세제" in user_input:
         return f"[{st.session_state.persona}] 세제 거의 다 써가던데, 더 살까?"
-    elif "물소리" in user_input or "물" in user_input:
-        return f"[{st.session_state.persona}] 생수랑 세제 체크해볼까?"
+    elif any(word in user_input for word in ["물", "생수", "음료"]):
+        return f"[{st.session_state.persona}] 생수는 아직 넉넉해 보여!"
+    elif any(word in user_input for word in ["배워", "가르쳐", "기억해"]):
+        return f"[{st.session_state.persona}] 응! 언제든 가르쳐주면 바로 배울게."
     else:
-        return f"[{st.session_state.persona}] 음, 무슨 소린지 잘 모르겠어. 더 가르쳐줘!"
+        # 엉뚱한 대답 방지: 모를 때는 솔직하게 물어보기
+        return f"[{st.session_state.persona}] 음, '{user_input}'은(는) 처음 들어봐. 조금 더 쉽게 말해줄래?"
 
-# --- UI 레이아웃 (모바일 최적화) ---
+# --- UI 레이아웃 ---
 st.set_page_config(page_title="재알메", layout="centered")
-st.title(f"🏠 재알메 v3.9 ({st.session_state.persona})")
+st.title(f"🏠 재알메 v4.0 ({st.session_state.persona})")
 
-# [완결판] 3. 강력한 음성 인식 & 자동 전송 브릿지
-# 폰 브라우저의 보안 정책을 우회하여 채팅창에 즉시 텍스트를 배달합니다.
+# [보완] 3. 스피커 잠금 해제형 음성 인식 브릿지
 st.components.v1.html(
     """
     <script>
     const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
     recognition.lang = 'ko-KR';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
+    
     function updateBtn(text, color) {
         const btn = document.getElementById('micBtn');
         if (btn) {
@@ -59,48 +61,48 @@ st.components.v1.html(
     }
 
     function speak(text) {
+        if (!text) return;
         window.speechSynthesis.cancel();
         const msg = new SpeechSynthesisUtterance(text);
         msg.lang = 'ko-KR';
         window.speechSynthesis.speak(msg);
     }
 
-    recognition.onstart = () => updateBtn('🎤 듣고 있어요...', '#28a745');
+    // 마이크 시작 시 '무음'을 먼저 재생하여 브라우저 스피커 권한을 미리 획득합니다.
+    function startWithSound() {
+        const dummy = new SpeechSynthesisUtterance(""); 
+        window.speechSynthesis.speak(dummy);
+        recognition.start();
+    }
+
+    recognition.onstart = () => updateBtn('🎤 주인의 말씀을 듣는 중...', '#28a745');
     recognition.onspeechend = () => updateBtn('🧠 생각 중...', '#ffc107');
     
     recognition.onresult = (event) => {
         const text = event.results[0][0].transcript;
-        updateBtn('✅ 인식: ' + text, '#007bff');
+        updateBtn('✅ 인식 완료: ' + text, '#007bff');
         
-        // 부모 창(Streamlit)의 모든 요소를 뒤져서 채팅창을 찾아냅/니다.
-        const findAndFill = () => {
-            const textArea = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"]');
-            if (textArea) {
-                const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                setter.call(textArea, text);
-                textArea.dispatchEvent(new Event('input', { bubbles: true }));
-                
-                setTimeout(() => {
-                    const sendBtn = window.parent.document.querySelector('button[data-testid="stChatInputSubmitButton"]');
-                    if (sendBtn) sendBtn.click();
-                    updateBtn('🎤 눌러서 재알메 깨우기', '#FF4B4B');
-                }, 600);
-            }
-        };
-        findAndFill();
+        const textArea = window.parent.document.querySelector('textarea[data-testid="stChatInputTextArea"]');
+        if (textArea) {
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+            setter.call(textArea, text);
+            textArea.dispatchEvent(new Event('input', { bubbles: true }));
+            
+            setTimeout(() => {
+                const sendBtn = window.parent.document.querySelector('button[data-testid="stChatInputSubmitButton"]');
+                if (sendBtn) sendBtn.click();
+            }, 500);
+        }
     };
 
-    recognition.onerror = (e) => {
-        console.error(e);
-        updateBtn('❌ 다시 시도 (클릭)', '#dc3545');
-    };
+    recognition.onerror = () => updateBtn('❌ 다시 눌러주세요', '#dc3545');
 
     window.addEventListener('message', (e) => {
         if (e.data.type === 'tts') speak(e.data.text);
     });
     </script>
-    <button id="micBtn" onclick="recognition.start()" style="width:100%; height:80px; border-radius:20px; background: #FF4B4B; color:white; border:none; font-size:22px; font-weight:bold; cursor:pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
-        🎤 눌러서 재알메 깨우기
+    <button id="micBtn" onclick="startWithSound()" style="width:100%; height:80px; border-radius:20px; background: #FF4B4B; color:white; border:none; font-size:20px; font-weight:bold; cursor:pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
+        🎤 눌러서 재알메에게 말하기
     </button>
     """,
     height=110,
@@ -111,20 +113,17 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# [보완] 실시간 입력 및 학습 로직
 if prompt := st.chat_input("재알메에게 직접 가르치기"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     
-    # 학습 모드: "미안" 답변 직후의 입력을 정답으로 저장
     if len(st.session_state.messages) > 1 and "몰라서 그랬어" in st.session_state.messages[-2]["content"]:
         st.session_state.learning_note.append({"wrong": "이전내용", "correct": prompt})
-        response = f"[{st.session_state.persona}] 아하, 그렇구나! 이제 확실히 배웠어. 고마워!"
+        response = f"[{st.session_state.persona}] 응! 확실히 배웠어. '{prompt}'라고 기억할게!"
     else:
         response = generate_response(prompt)
     
     st.session_state.messages.append({"role": "assistant", "content": response})
     
-    # TTS 음성 출력 트리거 (대괄호 제거 후 순수 텍스트만 읽기)
     clean_response = response.replace('[', '').replace(']', '')
     st.components.v1.html(f"<script>window.parent.postMessage({{type: 'tts', text: '{clean_response}'}}, '*');</script>", height=0)
     st.rerun()
